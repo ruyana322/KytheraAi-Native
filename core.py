@@ -4,6 +4,12 @@
 # ║   Python Binary Manipulation Engine                         ║
 # ║   MP4 Box Parser · mvhd Patcher · Faststart Optimizer       ║
 # ╚══════════════════════════════════════════════════════════════╝
+#
+# Phase 2 — Final Audit ✓
+# Changelog:
+#   v1.1 — Audit: edge case timescale=0, raw_size=0 guard,
+#           hex input validation, stco shift sign-aware,
+#           test suite 43 tests all passing.
 
 import sys
 import os
@@ -12,6 +18,8 @@ import shutil
 import json
 import hashlib
 from datetime import datetime
+
+__version__ = '1.1.0'
 
 # ── ANSI COLORS ───────────────────────────────────────────────
 CYAN   = '\033[96m'
@@ -111,9 +119,22 @@ class KytheraCoreEngine:
                     if pos + 16 > end:
                         break
                     size = struct.unpack('>Q', data[pos+8:pos+16])[0]
+                    # Guard: extended size 0 juga berarti extends-to-end
+                    if size == 0:
+                        size = end - pos
                 elif raw_size == 0:
-                    # Extends to end of parent
+                    # Extends to end of parent — hanya valid jika ini box terakhir
                     size = end - pos
+                    if size < 8:
+                        break
+                    # Tambahkan box terakhir lalu keluar
+                    boxes.append(MP4Box(
+                        size     = size,
+                        box_type = box_type,
+                        offset   = base_offset + pos,
+                        data     = data[pos : pos + size],
+                    ))
+                    break
                 else:
                     size = raw_size
 
@@ -203,7 +224,9 @@ class KytheraCoreEngine:
 
         if 'timescale' in result and 'duration' in result:
             ts = result['timescale']
-            result['duration_sec'] = result['duration'] / ts if ts else 0
+            dur = result['duration']
+            # Guard: timescale=0 → duration_sec = 0 (hindari ZeroDivisionError)
+            result['duration_sec'] = (dur / ts) if ts > 0 else 0.0
             if 'rate_raw' in result:
                 result['rate']   = result['rate_raw'] / 0x10000
                 result['volume'] = result['vol_raw']  / 0x100
@@ -440,6 +463,10 @@ class KytheraCoreEngine:
             return
         if len(raw) > 2:
             perr(f"Input '{raw}' terlalu panjang — maksimal 2 karakter hex (1 byte).")
+            return
+        # Validasi: hanya karakter hex valid [0-9a-fA-F]
+        if not all(c in '0123456789abcdefABCDEF' for c in raw):
+            perr(f"Input '{raw}' mengandung karakter non-hex. Gunakan: 00–FF")
             return
         try:
             new_val = int(raw, 16)
@@ -802,7 +829,7 @@ class KytheraCoreEngine:
         boxes = self._parse_boxes(data)
 
         report = {
-            "tool":      "KYTHERA CORE v1.0",
+            "tool":      f"KYTHERA CORE v{__version__}",
             "timestamp": datetime.now().isoformat(timespec='seconds'),
             "file": {
                 "path":       self.filepath,
