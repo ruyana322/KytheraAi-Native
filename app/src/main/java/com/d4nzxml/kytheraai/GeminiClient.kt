@@ -6,7 +6,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class Msg(val user: Boolean, val text: String)
-class ApiError(val code: Int, val body: String) : Exception("HTTP $code")
+class ApiError(val code: Int, val body: String) : Exception(detail(body))
+private fun detail(b: String): String = try {
+    JSONObject(b).getJSONObject("error").getString("message").take(200)
+} catch (_: Exception) { b.take(200) }
 
 object GeminiClient {
     fun stream(key: String, model: String, system: String, history: List<Msg>,
@@ -33,6 +36,7 @@ object GeminiClient {
         if (c.responseCode !in 200..299) {
             throw ApiError(c.responseCode, c.errorStream?.bufferedReader()?.readText().orEmpty())
         }
+        var got = false
         c.inputStream.bufferedReader().useLines { lines ->
             lines.forEach { l ->
                 if (l.startsWith("data:")) {
@@ -41,10 +45,12 @@ object GeminiClient {
                         ?.optJSONObject("content")?.optJSONArray("parts")
                     if (parts != null) for (i in 0 until parts.length()) {
                         val p = parts.getJSONObject(i)
-                        if (!p.optBoolean("thought")) onToken(p.optString("text"))
+                        val tx = p.optString("text")
+                        if (!p.optBoolean("thought") && tx.isNotEmpty()) { got = true; onToken(tx) }
                     }
                 }
             }
         }
+        if (!got) throw ApiError(0, "")
     }
 }

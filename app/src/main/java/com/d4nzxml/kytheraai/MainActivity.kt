@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun App(vm: ChatViewModel = viewModel()) {
-    var settings by remember { mutableStateOf(vm.apiKey.isBlank()) }
+    var settings by remember { mutableStateOf(vm.active.key.isBlank()) }
     Box(Modifier.fillMaxSize().background(Bg)) {
         if (settings) SettingsScreen(vm) { settings = false } else ChatScreen(vm) { settings = true }
     }
@@ -93,6 +93,7 @@ fun ChatScreen(vm: ChatViewModel, openSettings: () -> Unit) {
             Image(painterResource(R.drawable.kythera_logo), null, Modifier.size(30.dp))
             Spacer(Modifier.width(10.dp))
             Text("Kythera AI", color = Txt, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            ModelChip(vm)
             IconButton({ vm.newChat() }) { Icon(Icons.Default.Add, "Chat baru", tint = Txt) }
             IconButton(openSettings) { Icon(Icons.Default.Settings, "Pengaturan", tint = Txt) }
         }
@@ -157,7 +158,7 @@ fun AiMessage(text: String, loading: Boolean) {
         Image(painterResource(R.drawable.kythera_logo), null, Modifier.padding(top = 2.dp).size(26.dp))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            if (text.isEmpty() && loading) Dots() else {
+            if (text.isEmpty() && loading) Row(verticalAlignment = Alignment.CenterVertically) { Dots(); Spacer(Modifier.width(10.dp)); Text("Berpikir…", color = Sub, fontSize = 13.sp) } else {
                 text.split("```").forEachIndexed { i, part ->
                     if (i % 2 == 1) CodeBlock(part)
                     else if (part.isNotBlank()) Text(md(part.trim('\n')), color = Txt, fontSize = 15.5.sp, lineHeight = 24.sp)
@@ -248,23 +249,59 @@ fun InputBar(vm: ChatViewModel) {
 }
 
 @Composable
+fun ModelChip(vm: ChatViewModel) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(Modifier.clip(RoundedCornerShape(16.dp)).background(Surf).border(1.dp, Line, RoundedCornerShape(16.dp))
+            .clickable { open = true }.padding(12.dp, 6.dp)) {
+            Text(vm.active.name + " ▾", color = Txt, fontSize = 13.sp)
+        }
+        DropdownMenu(open, { open = false }) {
+            vm.profiles.forEach { q ->
+                DropdownMenuItem(text = { Text(q.name + if (q.model.isNotBlank()) "  ·  " + q.model else "") },
+                    onClick = { vm.select(q.id); open = false })
+            }
+        }
+    }
+}
+
+@Composable
 fun SettingsScreen(vm: ChatViewModel, close: () -> Unit) {
     BackHandler(onBack = close)
-    var key by remember { mutableStateOf(vm.apiKey) }
-    var model by remember { mutableStateOf(vm.model) }
+    val list = remember { mutableStateListOf<Profile>().apply { addAll(vm.profiles) } }
+    var sel by remember { mutableStateOf(vm.activeId) }
     var sys by remember { mutableStateOf(vm.system) }
+    val i = list.indexOfFirst { it.id == sel }.coerceAtLeast(0)
+    val p = list[i]
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(close) { Icon(Icons.Default.Close, "Tutup", tint = Txt) }
             Text("Pengaturan", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(16.dp))
-        Field("Gemini API key", key, { key = it }, "Ambil gratis di aistudio.google.com/apikey. Disimpan hanya di HP kamu.", true)
-        Field("Model", model, { model = it }, "Ganti jika muncul error model tidak ditemukan.")
-        Field("Instruksi kustom (opsional)", sys, { sys = it }, "Gaya atau aturan jawaban Kythera.", false, false)
+        Spacer(Modifier.height(12.dp))
+        Text("Penyedia model", color = Sub, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            list.forEach { q ->
+                val on = q.id == sel
+                Box(Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) Purple else Surf)
+                    .border(1.dp, if (on) Purple else Line, RoundedCornerShape(20.dp))
+                    .clickable { sel = q.id }.padding(14.dp, 8.dp)) {
+                    Text(q.name + if (q.key.isNotBlank()) " ✓" else "", color = Color.White, fontSize = 14.sp)
+                }
+            }
+        }
+        val hint = when (p.type) {
+            "gemini" -> "Ambil gratis di aistudio.google.com/apikey. Disimpan hanya di HP kamu."
+            "anthropic" -> "Buat di console.anthropic.com (berbayar). Disimpan hanya di HP kamu."
+            else -> "Key dari penyedia (DashScope, OpenRouter, dll). Disimpan hanya di HP kamu."
+        }
+        Field("API key ${p.name}", p.key, { list[i] = p.copy(key = it.trim()) }, hint, true)
+        Field("Model", p.model, { list[i] = p.copy(model = it.trim()) }, "Tulis nama model persis seperti di dokumentasi penyedia.")
+        if (p.type == "openai") Field("Base URL", p.baseUrl, { list[i] = p.copy(baseUrl = it.trim()) }, "Alamat API kompatibel OpenAI, tanpa /chat/completions.")
+        Field("Instruksi kustom (opsional)", sys, { sys = it }, "Gaya atau aturan jawaban Kythera, berlaku untuk semua model.", false, false)
         Spacer(Modifier.height(8.dp))
-        Button({ vm.saveSettings(key.trim(), model.trim(), sys); close() }, Modifier.fillMaxWidth().height(50.dp),
-            enabled = key.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = Purple)) { Text("Simpan", color = Color.White) }
+        Button({ vm.saveProfiles(list.toList(), sel, sys); close() }, Modifier.fillMaxWidth().height(50.dp),
+            enabled = p.key.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = Purple)) { Text("Simpan & pakai ${p.name}", color = Color.White) }
     }
 }
 
