@@ -40,7 +40,7 @@ object Llm {
         c.requestMethod = "POST"
         c.doOutput = true
         c.connectTimeout = 15000
-        c.readTimeout = 90000
+        c.readTimeout = 60000
         headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         if (c.responseCode !in 200..299) throw ApiError(c.responseCode, c.errorStream?.bufferedReader()?.readText().orEmpty())

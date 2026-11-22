@@ -20,7 +20,7 @@ object GeminiClient {
         c.requestMethod = "POST"
         c.doOutput = true
         c.connectTimeout = 15000
-        c.readTimeout = 90000
+        c.readTimeout = 60000
         c.setRequestProperty("Content-Type", "application/json")
         c.setRequestProperty("x-goog-api-key", key)
         val contents = JSONArray()
@@ -30,6 +30,8 @@ object GeminiClient {
                 .put("parts", JSONArray().put(JSONObject().put("text", it.text))))
         }
         val body = JSONObject().put("contents", contents)
+        if (model.startsWith("gemini-4") || model.startsWith("gemini-3"))
+            body.put("generationConfig", JSONObject().put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW")))
         if (system.isNotBlank()) body.put("systemInstruction",
             JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
         c.outputStream.use { it.write(body.toString().toByteArray()) }

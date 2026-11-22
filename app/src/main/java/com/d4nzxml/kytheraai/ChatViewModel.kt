@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -105,10 +106,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val hist = messages.dropLast(1).toList()
         val s = base + (if (system.isNotBlank()) "\n\n$system" else "")
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                Llm.stream(p, s, hist, { conn = it }) { t -> main.post { append(t) } }
-            } catch (e: Exception) {
-                if (!stopped) main.post { error = friendly(e) }
+            var attempt = 0
+            var got = false
+            while (true) {
+                try {
+                    Llm.stream(p, s, hist, { conn = it }) { t -> got = true; main.post { append(t) } }
+                    break
+                } catch (e: Exception) {
+                    if (stopped) break
+                    val again = !got && attempt < 2 &&
+                        ((e is ApiError && (e.code == 503 || e.code == 429)) || e is java.net.SocketTimeoutException)
+                    if (again) { attempt++; delay(3000L * attempt); if (stopped) break; continue }
+                    main.post { error = friendly(e) }
+                    break
+                }
             }
             main.post {
                 busy = false
